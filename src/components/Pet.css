@@ -1,0 +1,187 @@
+/* ══════════════════════════════════════════════════════════════
+   Pet.css  —  宠物形象样式
+   表情由 CSS 类驱动；视线/头部 transform 由 CSS 自定义属性驱动
+   ══════════════════════════════════════════════════════════════ */
+
+/* ── 根容器 ── */
+
+.pet-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* 宠物本体不参与窗口拖拽，保留鼠标交互 */
+  -webkit-app-region: no-drag;
+  cursor: grab;
+}
+
+.pet-container:active {
+  cursor: grabbing;
+}
+
+/* ── 点击动画 ── */
+
+@keyframes petClick {
+  0%   { transform: scale(1);    }
+  50%  { transform: scale(1.15); }
+  100% { transform: scale(1);    }
+}
+
+.pet-container--clicking {
+  animation: petClick 0.3s ease-out;
+  cursor: pointer;
+}
+
+/* ── SVG 基础 ── */
+
+.pet-svg {
+  width: 200px;
+  height: 240px;
+  overflow: visible;
+  /* GPU 加速，防止动画抖动 */
+  will-change: transform;
+  transition: filter 0.35s ease;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   表情显隐系统
+   默认隐藏所有 expression-* 分组；
+   根容器的 BEM 修饰符决定哪一组可见。
+   ══════════════════════════════════════════════════════════════ */
+
+.pet-eyes  > g,
+.pet-mouth > g,
+.pet-blush > g {
+  display: none;
+}
+
+.pet-container--idle    .expression-idle,
+.pet-container--happy   .expression-happy,
+.pet-container--sleepy  .expression-sleepy,
+.pet-container--excited .expression-excited,
+.pet-container--curious .expression-curious {
+  display: block;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   视线追踪 & 头部跟随（Step 2 预留接口）
+   通过 JS 设置 CSS 自定义属性即可驱动 transform：
+     el.style.setProperty('--gaze-x', `${dx}px`)
+     el.style.setProperty('--head-tilt', `${deg}deg`)
+   ══════════════════════════════════════════════════════════════ */
+
+.pet-eyes {
+  /* 视线偏移：JS 通过 --gaze-x / --gaze-y 驱动，最大 ±4px */
+  transform: translate(var(--gaze-x, 0px), var(--gaze-y, 0px));
+  transform-box: fill-box;
+  transform-origin: center;
+  /* 略快的过渡，视线跟随要有即时感 */
+  transition: transform 0.1s ease-out;
+}
+
+.pet-head {
+  /* 头部轻微倾斜：JS 通过 --head-tilt 驱动，最大 ±6deg */
+  transform: rotate(var(--head-tilt, 0deg));
+  transform-box: fill-box;
+  /* 以头圆圆心为旋转原点（SVG 坐标：cx=100, cy=100） */
+  transform-origin: 100px 100px;
+  /* 比眼睛稍慢，产生视线→头部的层次感 */
+  transition: transform 0.15s ease-out;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   BEM 情绪动画
+   ══════════════════════════════════════════════════════════════ */
+
+/* ── idle：柔和呼吸 + 轻微悬浮 ── */
+@keyframes breathe {
+  0%, 100% { transform: scale(1)    translateY(0px);  }
+  50%       { transform: scale(1.03) translateY(-4px); }
+}
+
+.pet-container--idle .pet-svg {
+  animation: breathe 3.6s ease-in-out infinite;
+}
+
+/* ── happy：小跳跃 ── */
+@keyframes bounce {
+  0%, 100% { transform: translateY(0px)   rotate(0deg);  }
+  30%       { transform: translateY(-10px) rotate(-2deg); }
+  60%       { transform: translateY(-6px)  rotate(2deg);  }
+}
+
+.pet-container--happy .pet-svg {
+  animation: bounce 1.2s ease-in-out infinite;
+  filter: drop-shadow(0 0 8px rgba(255, 200, 80, 0.5));
+}
+
+/* ── sleepy：缓慢摇晃 ── */
+@keyframes sway {
+  0%, 100% { transform: rotate(0deg)  translateY(0px);  }
+  25%       { transform: rotate(-3deg) translateY(2px); }
+  75%       { transform: rotate(3deg)  translateY(2px); }
+}
+
+.pet-container--sleepy .pet-svg {
+  animation: sway 4s ease-in-out infinite;
+  filter: brightness(0.92);
+}
+
+/* ── excited：快速抖动 ── */
+@keyframes wiggle {
+  0%, 100% { transform: rotate(0deg)   scale(1);    }
+  20%       { transform: rotate(-5deg)  scale(1.05); }
+  40%       { transform: rotate(5deg)   scale(1.05); }
+  60%       { transform: rotate(-4deg)  scale(1.04); }
+  80%       { transform: rotate(4deg)   scale(1.04); }
+}
+
+.pet-container--excited .pet-svg {
+  animation: wiggle 0.7s ease-in-out infinite;
+  filter: drop-shadow(0 0 10px rgba(255, 160, 60, 0.55));
+}
+
+/* ── curious：歪头 ── */
+@keyframes tilt {
+  0%, 100% { transform: rotate(-6deg) translateY(0px);  }
+  50%       { transform: rotate(-9deg) translateY(-3px); }
+}
+
+.pet-container--curious .pet-svg {
+  animation: tilt 2.4s ease-in-out infinite;
+  transform-origin: center bottom;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   随机行为动画（应用于根容器，短暂触发后自动清除）
+   ══════════════════════════════════════════════════════════════ */
+
+/* ── blink：快速眨眼（0.2s）── */
+@keyframes petBlink {
+  0%, 100% { transform: scaleY(1);   }
+  50%       { transform: scaleY(0.1); }
+}
+
+.pet-container--blink {
+  animation: petBlink 0.2s ease-out;
+}
+
+/* ── stretch：伸懒腰（1s）── */
+@keyframes petStretch {
+  0%   { transform: scale(1);      }
+  50%  { transform: scale(1.2, 0.9); }
+  100% { transform: scale(1);      }
+}
+
+.pet-container--stretch {
+  animation: petStretch 1s ease-out;
+}
+
+/* ── yawn：打哈欠（1.5s）── */
+@keyframes petYawn {
+  0%, 100% { transform: scale(1);    }
+  50%       { transform: scale(1.1); opacity: 0.8; }
+}
+
+.pet-container--yawn {
+  animation: petYawn 1.5s ease-out;
+}

@@ -3,7 +3,7 @@ mod config;
 mod state;
 
 use config::AppConfig;
-use state::{new_shared_state, SharedState};
+use state::{new_shared_state, PetState, SharedState};
 use tauri::Manager;
 
 // ── Commands ──────────────────────────────────────────────────────────────────
@@ -15,7 +15,7 @@ async fn get_pet_status(state: tauri::State<'_, SharedState>) -> Result<String, 
     let status = format!(
         "Moocha v{} | mood: {} | ready: {}",
         env!("CARGO_PKG_VERSION"),
-        s.pet_mood,
+        s.pet_state,
         s.is_ready,
     );
     tracing::debug!("get_pet_status -> {}", status);
@@ -172,6 +172,7 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 let mut s = state_clone.write().await;
                 s.is_ready = true;
+                s.pet_state = PetState::Idle;
                 tracing::info!("Moocha 已就绪");
             });
             Ok(())

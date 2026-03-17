@@ -1,0 +1,62 @@
+<svg viewBox="0 0 200 240" xmlns="http://www.w3.org/2000/svg">
+  <!-- Tail (drawn first, sits behind body) -->
+  <path d="M 150,202 C 176,186 184,158 170,132 C 158,110 145,124 152,138"
+    fill="#f2d48c" stroke="#3a2200" stroke-width="2.5" stroke-linecap="round"/>
+
+  <!-- Body -->
+  <ellipse cx="100" cy="192" rx="52" ry="46"
+    fill="#f2d48c" stroke="#3a2200" stroke-width="2.5"/>
+
+  <!-- Head -->
+  <circle cx="100" cy="100" r="56"
+    fill="#f2d48c" stroke="#3a2200" stroke-width="2.5"/>
+
+  <!-- Left ear outer -->
+  <polygon points="44,74 66,12 94,66"
+    fill="#f2d48c" stroke="#3a2200" stroke-width="2.5" stroke-linejoin="round"/>
+  <!-- Left ear inner -->
+  <polygon points="53,70 68,30 90,64" fill="#ffaab8"/>
+  <!-- Left ear tuft -->
+  <path d="M 63,13 L 58,4 M 66,12 L 66,3 M 69,13 L 73,5"
+    stroke="#3a2200" stroke-width="1.2" stroke-linecap="round"/>
+
+  <!-- Right ear outer -->
+  <polygon points="106,66 134,12 156,74"
+    fill="#f2d48c" stroke="#3a2200" stroke-width="2.5" stroke-linejoin="round"/>
+  <!-- Right ear inner -->
+  <polygon points="110,64 132,30 147,70" fill="#ffaab8"/>
+  <!-- Right ear tuft -->
+  <path d="M 131,13 L 127,4 M 134,12 L 134,3 M 137,13 L 142,5"
+    stroke="#3a2200" stroke-width="1.2" stroke-linecap="round"/>
+
+  <!-- Chest fluff -->
+  <ellipse cx="100" cy="166" rx="30" ry="24" fill="#fffff5"/>
+
+  <!-- Forehead tabby mark (subtle) -->
+  <path d="M 84,62 Q 92,56 100,62 Q 108,56 116,62"
+    fill="none" stroke="#c8943a" stroke-width="1.8" opacity="0.45"/>
+
+  <!-- Left eye -->
+  <ellipse cx="82" cy="100" rx="11" ry="12" fill="#2a1600"/>
+  <ellipse cx="85" cy="97" rx="3.5" ry="3.5" fill="white"/>
+  <!-- Right eye -->
+  <ellipse cx="118" cy="100" rx="11" ry="12" fill="#2a1600"/>
+  <ellipse cx="121" cy="97" rx="3.5" ry="3.5" fill="white"/>
+
+  <!-- Nose -->
+  <path d="M 100,112 L 95,119 L 105,119 Z" fill="#e87890"/>
+  <!-- Mouth -->
+  <path d="M 95,119 Q 100,126 105,119"
+    fill="none" stroke="#3a2200" stroke-width="1.8" stroke-linecap="round"/>
+  <path d="M 100,119 L 100,124"
+    fill="none" stroke="#3a2200" stroke-width="1.5" stroke-linecap="round" opacity="0.5"/>
+
+  <!-- Whiskers left -->
+  <line x1="18" y1="106" x2="84" y2="110" stroke="#3a2200" stroke-width="0.9" opacity="0.35" stroke-linecap="round"/>
+  <line x1="16" y1="115" x2="84" y2="116" stroke="#3a2200" stroke-width="0.9" opacity="0.35" stroke-linecap="round"/>
+  <line x1="20" y1="124" x2="84" y2="121" stroke="#3a2200" stroke-width="0.9" opacity="0.35" stroke-linecap="round"/>
+  <!-- Whiskers right -->
+  <line x1="182" y1="106" x2="116" y2="110" stroke="#3a2200" stroke-width="0.9" opacity="0.35" stroke-linecap="round"/>
+  <line x1="184" y1="115" x2="116" y2="116" stroke="#3a2200" stroke-width="0.9" opacity="0.35" stroke-linecap="round"/>
+  <line x1="180" y1="124" x2="116" y2="121" stroke="#3a2200" stroke-width="0.9" opacity="0.35" stroke-linecap="round"/>
+</svg>

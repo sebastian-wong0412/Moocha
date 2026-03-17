@@ -17,14 +17,14 @@ body {
   overflow: hidden;
 }
 
-.pet-container {
+/* 应用根容器：全屏透明，允许整体拖拽 */
+.app-root {
   width: 100vw;
   height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
   background: transparent;
-  /* 允许窗口拖拽 */
   -webkit-app-region: drag;
 }
 
