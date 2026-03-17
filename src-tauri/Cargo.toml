@@ -1,6 +1,6 @@
 [package]
 name = "moocha"
-version = "0.1.0"
+version = "0.2.0"
 description = "A Rust-powered AI Desktop Pet (Siberian Forest Cat)"
 authors = ["Your Name"]
 edition = "2021"
@@ -27,6 +27,9 @@ thiserror = "2.0"
 
 # async trait 支持，用于 AIProvider
 async-trait = "0.1"
+
+# 获取系统用户数据目录（config_path 使用）
+dirs = "5.0"
 
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

@@ -5,7 +5,6 @@
 **An AI-powered desktop pet · AI 驱动的桌面宠物**
 
 *Inspired by the gentle soul of the Siberian Forest Cat*
-*灵感源自西伯利亚森林猫的温柔灵魂*
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Tauri](https://img.shields.io/badge/Tauri-v2-24C8D8?logo=tauri)](https://tauri.app)
