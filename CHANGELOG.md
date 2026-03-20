@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.4.0] - 2026-03-17
+
+### Added
+- AI Chat System (OpenAI & Ollama support)
+- Streaming output with typewriter effect
+- Chat history persistence (chat_history.json)
+- Clear history function
+- Pet mood linkage with chat (Excited/Curious/Happy/Sleepy)
+- AbortController for request cancellation
+- Welcome message on first launch
+
+### Changed
+- Chat UI with dark theme
+- Message bubbles (user/assistant)
+- Auto-scroll to bottom during streaming
+
+### Fixed
+- Event listener cleanup to prevent memory leaks
+- Abort previous request on new send
+- Error handling without affecting mood state
+
+### Security
+- API Key not stored in chat history
+- Local history file in app_data_dir
+
 ## [0.3.0] - 2026-03-17
 
 ### Added

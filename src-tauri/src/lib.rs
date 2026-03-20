@@ -1,10 +1,12 @@
 mod ai;
+mod chat_history;
 mod config;
 mod state;
 
+use ai::ContextMessage;
 use config::AppConfig;
 use state::{new_shared_state, PetState, SharedState};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 // ── Commands ──────────────────────────────────────────────────────────────────
 
@@ -101,6 +103,140 @@ async fn test_connection_with(base_url: String, api_key: String) -> Result<bool,
     probe_connection(&base_url, &api_key).await
 }
 
+/// 非流式对话：发送一条消息，等待 AI 返回完整回复。
+///
+/// `context` 为可选历史上下文（`[{role, content}, ...]` 形式的 JSON 数组字符串，
+/// 为空时传空数组）。
+#[tauri::command]
+async fn chat(
+    state: tauri::State<'_, SharedState>,
+    message: String,
+    context: Vec<serde_json::Value>,
+) -> Result<String, String> {
+    let config = {
+        let s = state.read().await;
+        let c = s.config.lock().map_err(|e| format!("配置锁异常: {}", e))?;
+        c.clone()
+    };
+
+    // 将前端传入的 JSON 数组转换为 ContextMessage
+    let ctx: Vec<ContextMessage> = context
+        .into_iter()
+        .filter_map(|v| {
+            let role = v["role"].as_str()?.to_string();
+            let content = v["content"].as_str()?.to_string();
+            Some(ContextMessage { role, content })
+        })
+        .collect();
+
+    let provider = ai::create_provider(&config);
+
+    tracing::info!("chat: provider={}, message_len={}", provider.name(), message.len());
+
+    provider
+        .chat(&message, &ctx)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// 流式对话：发送一条消息，通过 Tauri 事件逐块推送回复。
+///
+/// 事件：
+///   - `chat-chunk`  每个文本块（`String`）
+///   - `chat-done`   流结束（`""`）
+///   - `chat-error`  错误信息（`String`）
+///
+/// 本命令立即返回，流在后台任务中运行。
+#[tauri::command]
+async fn chat_stream(
+    state: tauri::State<'_, SharedState>,
+    app: tauri::AppHandle,
+    message: String,
+    context: Vec<serde_json::Value>,
+) -> Result<(), String> {
+    let config = {
+        let s = state.read().await;
+        let c = s.config.lock().map_err(|e| format!("配置锁异常: {}", e))?;
+        c.clone()
+    };
+
+    let ctx: Vec<ContextMessage> = context
+        .into_iter()
+        .filter_map(|v| {
+            let role = v["role"].as_str()?.to_string();
+            let content = v["content"].as_str()?.to_string();
+            Some(ContextMessage { role, content })
+        })
+        .collect();
+
+    let provider = ai::create_provider(&config);
+
+    tracing::info!("chat_stream: provider={}", provider.name());
+
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+
+    // 后台任务：Provider 产生数据块 → channel → 转发为 Tauri 事件
+    let app_bg = app.clone();
+    tauri::async_runtime::spawn(async move {
+        // 在独立任务中运行 Provider 流，使其与 relay 解耦
+        let stream_handle = tauri::async_runtime::spawn(async move {
+            provider.chat_stream(&message, &ctx, tx).await
+        });
+
+        // 将 channel 中的块逐一 emit 给前端
+        while let Some(chunk) = rx.recv().await {
+            if app_bg.emit("chat-chunk", &chunk).is_err() {
+                tracing::warn!("chat-chunk emit 失败，前端可能已关闭");
+                break;
+            }
+        }
+
+        // Provider 任务结束后发送完成/错误事件
+        match stream_handle.await {
+            Ok(Ok(())) => {
+                let _ = app_bg.emit("chat-done", "");
+            }
+            Ok(Err(e)) => {
+                tracing::error!("chat_stream provider 错误: {}", e);
+                let _ = app_bg.emit("chat-error", e.to_string());
+            }
+            Err(e) => {
+                tracing::error!("chat_stream 任务 panic: {}", e);
+                let _ = app_bg.emit("chat-error", format!("内部错误: {}", e));
+            }
+        }
+    });
+
+    Ok(())
+}
+
+// ── 对话历史持久化 ────────────────────────────────────────────────────────────
+
+/// 返回已保存的全部消息（文件不存在则为空数组）。
+#[tauri::command]
+async fn get_chat_history(app: tauri::AppHandle) -> Result<Vec<chat_history::ChatMessage>, String> {
+    chat_history::load_history(&app)
+        .map(|h| h.messages)
+        .map_err(|e| e.to_string())
+}
+
+/// 追加一条消息并写盘。
+#[tauri::command]
+async fn save_chat_message(
+    app: tauri::AppHandle,
+    message: chat_history::ChatMessage,
+) -> Result<(), String> {
+    let mut history = chat_history::load_history(&app).map_err(|e| e.to_string())?;
+    history.messages.push(message);
+    history.save(&app).map_err(|e| e.to_string())
+}
+
+/// 清空历史文件。
+#[tauri::command]
+async fn clear_chat_history(app: tauri::AppHandle) -> Result<(), String> {
+    chat_history::clear_history(&app).map_err(|e| e.to_string())
+}
+
 // ── 内部辅助 ──────────────────────────────────────────────────────────────────
 
 /// 向 `{base_url}/models` 发送 GET 请求（8 秒超时）。
@@ -165,6 +301,11 @@ pub fn run() {
             save_config,
             test_connection,
             test_connection_with,
+            chat,
+            chat_stream,
+            get_chat_history,
+            save_chat_message,
+            clear_chat_history,
         ])
         .setup(|app| {
             let state: tauri::State<'_, SharedState> = app.state();
