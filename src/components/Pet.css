@@ -6,12 +6,99 @@
 /* ── 根容器 ── */
 
 .pet-container {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
   /* 宠物本体不参与窗口拖拽，保留鼠标交互 */
   -webkit-app-region: no-drag;
   cursor: grab;
+}
+
+/* 情境规则触发的提示气泡（约 3 秒后由 JS 清除） */
+.pet-context-hint {
+  position: absolute;
+  left: 50%;
+  bottom: 100%;
+  transform: translateX(-50%);
+  margin-bottom: 6px;
+  max-width: 220px;
+  padding: 8px 10px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: rgba(255, 255, 255, 0.95);
+  background: rgba(22, 22, 28, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+  z-index: 8;
+  text-align: center;
+  -webkit-app-region: no-drag;
+}
+
+/* ── 定时提醒（需用户点「知道了」）── */
+
+.pet-reminder-bubble {
+  position: absolute;
+  left: 50%;
+  bottom: 100%;
+  transform: translateX(-50%);
+  margin-bottom: 6px;
+  min-width: 200px;
+  max-width: 260px;
+  padding: 10px 12px 10px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #fff;
+  border-radius: 12px;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.45);
+  z-index: 12;
+  text-align: center;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  -webkit-app-region: no-drag;
+  pointer-events: auto;
+}
+
+.pet-reminder-bubble p {
+  margin: 0 0 10px;
+}
+
+.pet-reminder-dismiss {
+  width: 100%;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: inherit;
+  color: rgba(0, 0, 0, 0.85);
+  background: rgba(255, 255, 255, 0.92);
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.1s;
+}
+
+.pet-reminder-dismiss:hover {
+  background: #fff;
+}
+
+.pet-reminder-dismiss:active {
+  transform: scale(0.98);
+}
+
+/* 整点：蓝色 */
+.pet-reminder-hourly {
+  background: linear-gradient(145deg, #2563eb 0%, #1d4ed8 100%);
+}
+
+/* 休息：橙色 */
+.pet-reminder-break {
+  background: linear-gradient(145deg, #ea580c 0%, #c2410c 100%);
+}
+
+/* 久坐：红色 */
+.pet-reminder-long-work {
+  background: linear-gradient(145deg, #dc2626 0%, #991b1b 100%);
 }
 
 .pet-container:active {

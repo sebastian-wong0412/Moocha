@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { AppConfig } from "../types/config";
+import type { ReminderConfig } from "../types/reminderConfig";
 
 /**
  * 从 Rust 后端获取当前应用配置。
@@ -37,4 +38,25 @@ export async function testConnectionWith(
     baseUrl,
     apiKey,
   });
+}
+
+/** 提醒配置（整点 / 休息间隔 / 久坐） */
+export async function getReminderConfig(): Promise<ReminderConfig> {
+  return invoke<ReminderConfig>("get_reminder_config");
+}
+
+export async function updateReminderConfig(
+  config: ReminderConfig,
+): Promise<void> {
+  await invoke("update_reminder_config", { config });
+}
+
+/** 用户已读提醒；休息/久坐会重置连续工作计时 */
+export async function acknowledgeReminder(kind: string): Promise<void> {
+  await invoke("acknowledge_reminder", { kind });
+}
+
+/** 手动触发休息提醒（测试） */
+export async function triggerBreakReminder(): Promise<void> {
+  await invoke("trigger_break_reminder");
 }

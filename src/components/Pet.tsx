@@ -1,11 +1,15 @@
 import { useEffect, useRef, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { svgAppearance } from "../config/petAppearance";
 import { useMousePosition } from "../hooks/useMousePosition";
 import { useRandomBehavior } from "../hooks/useRandomBehavior";
 import type { PetBehavior } from "../hooks/useRandomBehavior";
 import { useMoodChange } from "../hooks/useMoodChange";
+import { useContextActions } from "../hooks/useContextActions";
 import type { PetAppearance, PetMood } from "../types/pet";
+import type { PetReminderPayload } from "../types/petReminder";
+import { acknowledgeReminder } from "../utils/tauri";
 import "./Pet.css";
 
 export type { PetMood };
@@ -19,6 +23,25 @@ const MAX_TILT_DEG = 6;
 /** 将 value 限制在 [min, max] */
 const clamp = (v: number, min: number, max: number) =>
   Math.max(min, Math.min(max, v));
+
+const PET_MOODS: readonly PetMood[] = ["idle", "happy", "sleepy", "excited", "curious"];
+
+function isPetMood(v: string): v is PetMood {
+  return (PET_MOODS as readonly string[]).includes(v);
+}
+
+function reminderMoodForKind(kind: string): PetMood | null {
+  if (kind === "hourly") return "happy";
+  if (kind === "break") return "curious";
+  if (kind === "long_work") return "sleepy";
+  return null;
+}
+
+function reminderBubbleClass(kind: string): string {
+  if (kind === "hourly") return "pet-reminder-hourly";
+  if (kind === "long_work") return "pet-reminder-long-work";
+  return "pet-reminder-break";
+}
 
 interface Props {
   mood?: PetMood;
@@ -66,6 +89,74 @@ export default function Pet({ mood = "idle", appearance = svgAppearance, onMoodC
 
   // 自然情绪变化 Hook（仅在 idle/happy/sleepy 间轮换）
   useMoodChange(mood, onMoodChange ?? (() => {}));
+
+  /** 情境规则：后端 `context-action` → 切换情绪 + 短暂气泡 */
+  const [contextHint, setContextHint] = useState<string | null>(null);
+  const contextHintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onMoodChangeRef = useRef(onMoodChange);
+  onMoodChangeRef.current = onMoodChange;
+
+  useContextActions((batch) => {
+    const last = batch[batch.length - 1];
+    if (!last) return;
+    if (isPetMood(last.mood)) {
+      onMoodChangeRef.current?.(last.mood);
+    }
+    if (contextHintTimerRef.current) clearTimeout(contextHintTimerRef.current);
+    setContextHint(last.message);
+    contextHintTimerRef.current = setTimeout(() => {
+      setContextHint(null);
+      contextHintTimerRef.current = null;
+    }, 3000);
+  });
+
+  /** 定时提醒队列（需用户点「知道了」；与情境气泡分离） */
+  const [reminderQueue, setReminderQueue] = useState<PetReminderPayload[]>([]);
+  const activeReminder = reminderQueue[0] ?? null;
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    void listen<PetReminderPayload[]>("pet-reminder", (event) => {
+      const batch = event.payload;
+      if (!Array.isArray(batch) || batch.length === 0) return;
+      setReminderQueue((q) => [...q, ...batch]);
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    return () => unlisten?.();
+  }, []);
+
+  // 有强提醒时清掉短时情境气泡，避免叠字
+  useEffect(() => {
+    if (reminderQueue.length > 0) {
+      if (contextHintTimerRef.current) clearTimeout(contextHintTimerRef.current);
+      contextHintTimerRef.current = null;
+      setContextHint(null);
+    }
+  }, [reminderQueue.length]);
+
+  // 当前提醒对应情绪
+  useEffect(() => {
+    if (!activeReminder) return;
+    const m = reminderMoodForKind(activeReminder.kind);
+    if (m) onMoodChangeRef.current?.(m);
+  }, [activeReminder]);
+
+  async function dismissActiveReminder() {
+    if (!activeReminder) return;
+    try {
+      await acknowledgeReminder(activeReminder.kind);
+    } catch {
+      /* 离线/调试时仍可关闭 UI */
+    }
+    setReminderQueue((q) => q.slice(1));
+  }
+
+  useEffect(() => {
+    return () => {
+      if (contextHintTimerRef.current) clearTimeout(contextHintTimerRef.current);
+    };
+  }, []);
 
   // 根容器类：基础类 + 情绪修饰符 + 当前表情类 + 点击动画类 + 行为类
   const rootClass = [
@@ -138,6 +229,32 @@ export default function Pet({ mood = "idle", appearance = svgAppearance, onMoodC
       onClick={handleClick}
       onDoubleClick={handleDoubleClick}
     >
+      {activeReminder ? (
+        <div
+          className={`pet-reminder-bubble ${reminderBubbleClass(activeReminder.kind)}`}
+          role="alertdialog"
+          aria-labelledby="pet-reminder-msg"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <p id="pet-reminder-msg">{activeReminder.message}</p>
+          <button
+            type="button"
+            className="pet-reminder-dismiss"
+            onClick={(e) => {
+              e.stopPropagation();
+              void dismissActiveReminder();
+            }}
+          >
+            知道了
+          </button>
+        </div>
+      ) : (
+        contextHint && (
+          <div className="pet-context-hint" role="status" aria-live="polite">
+            {contextHint}
+          </div>
+        )
+      )}
       <svg
         ref={svgRef}
         viewBox="0 0 200 240"

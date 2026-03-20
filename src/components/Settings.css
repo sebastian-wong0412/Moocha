@@ -11,6 +11,8 @@
 
 .settings-panel {
   width: 340px;
+  max-height: min(520px, 92vh);
+  overflow-y: auto;
   background: rgba(30, 30, 30, 0.95);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 8px;
@@ -199,4 +201,68 @@
   height: 1px;
   background: rgba(255, 255, 255, 0.06);
   margin: 4px 0;
+}
+
+/* ── 提醒设置 ── */
+
+.reminder-section-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.75);
+  margin-top: 4px;
+  margin-bottom: 2px;
+}
+
+.reminder-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.reminder-toggle-row:last-of-type {
+  border-bottom: none;
+}
+
+.reminder-toggle-label {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.82);
+  flex: 1;
+}
+
+.reminder-toggle {
+  width: 16px;
+  height: 16px;
+  accent-color: #3b82f6;
+  cursor: pointer;
+}
+
+.form-input-number {
+  max-width: 100px;
+}
+
+.btn-reminder-save {
+  margin-top: 6px;
+  width: 100%;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  color: #fff;
+  background: rgba(59, 130, 246, 0.35);
+  border: 1px solid rgba(59, 130, 246, 0.45);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.btn-reminder-save:hover:not(:disabled) {
+  background: rgba(59, 130, 246, 0.5);
+}
+
+.btn-reminder-save:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }

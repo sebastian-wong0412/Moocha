@@ -1,11 +1,17 @@
 mod ai;
 mod chat_history;
 mod config;
+mod context_rules;
+mod reminder;
 mod state;
+mod system_monitor;
 
 use ai::ContextMessage;
+use chrono::Local;
 use config::AppConfig;
+use context_rules::ReminderConfig;
 use state::{new_shared_state, PetState, SharedState};
+use std::sync::Mutex;
 use tauri::{Emitter, Manager};
 
 // ── Commands ──────────────────────────────────────────────────────────────────
@@ -237,6 +243,108 @@ async fn clear_chat_history(app: tauri::AppHandle) -> Result<(), String> {
     chat_history::clear_history(&app).map_err(|e| e.to_string())
 }
 
+// ── 系统监控（v0.5）──────────────────────────────────────────────────────────
+
+/// 当前前台窗口标题（无法识别时为 `"Unknown"`）。
+#[tauri::command]
+async fn get_active_window() -> Result<String, String> {
+    tokio::task::spawn_blocking(system_monitor::get_active_window)
+        .await
+        .map_err(|e| format!("任务异常: {}", e))?
+}
+
+/// 当前前台应用名称（无法识别时为 `"Unknown"`）。
+#[tauri::command]
+async fn get_active_app() -> Result<String, String> {
+    tokio::task::spawn_blocking(system_monitor::get_active_app)
+        .await
+        .map_err(|e| format!("任务异常: {}", e))?
+}
+
+/// 本地时段：`morning` / `afternoon` / `evening` / `night`
+#[tauri::command]
+async fn get_system_time() -> Result<String, String> {
+    system_monitor::get_system_time()
+}
+
+/// 用户空闲时长（秒）；不支持的平台为 `0`。
+#[tauri::command]
+async fn get_idle_duration() -> Result<u64, String> {
+    tokio::task::spawn_blocking(system_monitor::get_idle_duration)
+        .await
+        .map_err(|e| format!("任务异常: {}", e))?
+}
+
+/// 全局 CPU 使用率（0.0–100.0）。
+#[tauri::command]
+async fn get_cpu_usage() -> Result<f32, String> {
+    tokio::task::spawn_blocking(system_monitor::get_cpu_usage)
+        .await
+        .map_err(|e| format!("任务异常: {}", e))?
+}
+
+/// 已用物理内存（字节）。
+#[tauri::command]
+async fn get_memory_usage() -> Result<u64, String> {
+    tokio::task::spawn_blocking(system_monitor::get_memory_usage)
+        .await
+        .map_err(|e| format!("任务异常: {}", e))?
+}
+
+/// 手动拉取当前情境下会触发的行动（**不经过**去重冷却，便于调试）。
+#[tauri::command]
+async fn check_context() -> Result<Vec<context_rules::ContextAction>, String> {
+    tokio::task::spawn_blocking(|| {
+        let app = system_monitor::get_active_app().unwrap_or_else(|_| "Unknown".into());
+        let time = system_monitor::get_system_time().unwrap_or_else(|_| "night".into());
+        let idle = system_monitor::get_idle_duration().unwrap_or(0);
+        context_rules::check_rules(&app, &time, idle)
+    })
+    .await
+    .map_err(|e| format!("任务异常: {}", e))
+}
+
+/// 读取休息 / 整点 / 久坐提醒配置
+#[tauri::command]
+fn get_reminder_config(state: tauri::State<'_, Mutex<reminder::ReminderBundle>>) -> Result<ReminderConfig, String> {
+    state
+        .lock()
+        .map(|b| b.config.clone())
+        .map_err(|e| format!("锁异常: {}", e))
+}
+
+/// 更新提醒配置并写盘
+#[tauri::command]
+fn update_reminder_config(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Mutex<reminder::ReminderBundle>>,
+    config: ReminderConfig,
+) -> Result<(), String> {
+    let mut g = state.lock().map_err(|e| format!("锁异常: {}", e))?;
+    g.config = config;
+    g.save_disk(&app)?;
+    Ok(())
+}
+
+/// 用户在前端确认已读某类提醒（休息/久坐会重置连续工作计时）
+#[tauri::command]
+fn acknowledge_reminder(
+    state: tauri::State<'_, Mutex<reminder::ReminderBundle>>,
+    kind: String,
+) -> Result<(), String> {
+    let mut g = state.lock().map_err(|e| format!("锁异常: {}", e))?;
+    g.manager.acknowledge(&kind);
+    Ok(())
+}
+
+/// 手动触发一次「休息」提醒（测试用）
+#[tauri::command]
+fn trigger_break_reminder(app: tauri::AppHandle) -> Result<(), String> {
+    let batch = vec![reminder::manual_break_payload()];
+    app.emit("pet-reminder", &batch)
+        .map_err(|e| format!("emit 失败: {}", e))
+}
+
 // ── 内部辅助 ──────────────────────────────────────────────────────────────────
 
 /// 向 `{base_url}/models` 发送 GET 请求（8 秒超时）。
@@ -306,8 +414,26 @@ pub fn run() {
             get_chat_history,
             save_chat_message,
             clear_chat_history,
+            get_active_window,
+            get_active_app,
+            get_system_time,
+            get_idle_duration,
+            get_cpu_usage,
+            get_memory_usage,
+            check_context,
+            get_reminder_config,
+            update_reminder_config,
+            acknowledge_reminder,
+            trigger_break_reminder,
         ])
+        .manage(Mutex::new(context_rules::RuleDeduper::default()))
         .setup(|app| {
+            let h = app.handle().clone();
+            let bundle = reminder::ReminderBundle::load(&h).unwrap_or_default();
+            if !app.manage(Mutex::new(bundle)) {
+                tracing::error!("注册 ReminderBundle 失败（类型已存在？）");
+            }
+
             let state: tauri::State<'_, SharedState> = app.state();
             let state_clone = state.inner().clone();
             tauri::async_runtime::spawn(async move {
@@ -316,6 +442,75 @@ pub fn run() {
                 s.pet_state = PetState::Idle;
                 tracing::info!("Moocha 已就绪");
             });
+
+            // 情境规则 + 定时提醒：每 60 秒
+            let app_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+
+                    let (actions_raw, app_name) = match tokio::task::spawn_blocking(|| {
+                        let app =
+                            system_monitor::get_active_app().unwrap_or_else(|_| "Unknown".into());
+                        let time =
+                            system_monitor::get_system_time().unwrap_or_else(|_| "night".into());
+                        let idle = system_monitor::get_idle_duration().unwrap_or(0);
+                        let actions = context_rules::check_rules(&app, &time, idle);
+                        (actions, app)
+                    })
+                    .await
+                    {
+                        Ok(v) => v,
+                        Err(e) => {
+                            tracing::warn!("情境检测任务 join 失败: {}", e);
+                            continue;
+                        }
+                    };
+
+                    let mut filtered: Vec<context_rules::ContextAction> = Vec::new();
+                    if let Some(deduper_state) =
+                        app_handle.try_state::<Mutex<context_rules::RuleDeduper>>()
+                    {
+                        if let Ok(mut deduper) = deduper_state.lock() {
+                            for a in actions_raw {
+                                let cd = context_rules::cooldown_for_rule(&a.rule);
+                                if deduper.try_fire(&a.rule, cd) {
+                                    filtered.push(a);
+                                }
+                            }
+                        }
+                    } else {
+                        tracing::debug!("RuleDeduper 未注册，跳过情境去重 emit");
+                    }
+
+                    if !filtered.is_empty() {
+                        if let Err(e) = app_handle.emit("context-action", &filtered) {
+                            tracing::warn!("emit context-action 失败: {}", e);
+                        } else {
+                            tracing::debug!("context-action: {} 条", filtered.len());
+                        }
+                    }
+
+                    // 整点 / 休息 / 久坐
+                    let pet_reminders = match app_handle.try_state::<Mutex<reminder::ReminderBundle>>() {
+                        Some(rb) => match rb.lock() {
+                            Ok(mut b) => {
+                                let cfg = b.config.clone();
+                                b.manager.process_tick(&app_name, &cfg, Local::now())
+                            }
+                            Err(_) => Vec::new(),
+                        },
+                        None => Vec::new(),
+                    };
+
+                    if !pet_reminders.is_empty() {
+                        if let Err(e) = app_handle.emit("pet-reminder", &pet_reminders) {
+                            tracing::warn!("emit pet-reminder 失败: {}", e);
+                        }
+                    }
+                }
+            });
+
             Ok(())
         })
         .run(tauri::generate_context!())

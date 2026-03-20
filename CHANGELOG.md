@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.5.0] - 2026-03-17
+
+### Added
+- System monitoring (active app, time, idle duration)
+- Context-aware behavior rules
+- Auto-greeting based on time of day
+- Work mode detection (VSCode, IDE, etc.)
+- Break reminders (hourly, long work)
+- Configurable reminder settings
+- Reminder queue with dismiss button
+- Rule deduplication with cooldown
+- Optional CPU and memory usage via sysinfo (`get_cpu_usage` / `get_memory_usage`)
+
+### Changed
+- Pet reacts to user's current activity
+- Smart notifications based on context
+- Settings panel expanded with reminder config
+
+### Fixed
+- Reminder cooldown prevents spam
+- Backend polling independent of frontend
+- Cross-platform support (Windows/macOS)
+
 ## [0.4.0] - 2026-03-17
 
 ### Added

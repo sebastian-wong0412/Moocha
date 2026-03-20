@@ -1,6 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { AppConfig } from "../types/config";
-import { getConfig, saveConfig, testConnectionWith } from "../utils/tauri";
+import type { ReminderConfig } from "../types/reminderConfig";
+import { DEFAULT_REMINDER_CONFIG } from "../types/reminderConfig";
+import {
+  getConfig,
+  getReminderConfig,
+  saveConfig,
+  testConnectionWith,
+  updateReminderConfig,
+} from "../utils/tauri";
 import "./Settings.css";
 
 type StatusType = "success" | "error" | "loading" | null;
@@ -20,6 +28,11 @@ export default function Settings({ onClose }: Props) {
   const [isLoading, setIsLoading] = useState(true);   // 初始配置加载
   const [isTesting, setIsTesting] = useState(false);  // 测试连接中
   const [isSaving, setIsSaving] = useState(false);    // 保存中
+  const [isReminderSaving, setIsReminderSaving] = useState(false);
+
+  const [reminderConfig, setReminderConfig] = useState<ReminderConfig>(
+    DEFAULT_REMINDER_CONFIG,
+  );
 
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [statusType, setStatusType] = useState<StatusType>(null);
@@ -27,16 +40,21 @@ export default function Settings({ onClose }: Props) {
   // 自动关闭定时器的 ref，防止内存泄漏
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // 任意操作进行中时禁用所有按钮
+  // 任意操作进行中时禁用主表单按钮
   const isBusy = isLoading || isTesting || isSaving;
+  const reminderFieldsLocked = isLoading || isBusy || isReminderSaving;
 
   // ── 初始化：挂载时加载配置 ─────────────────────────────────────────────
   useEffect(() => {
-    getConfig()
-      .then((cfg) => {
+    Promise.all([
+      getConfig(),
+      getReminderConfig().catch(() => DEFAULT_REMINDER_CONFIG),
+    ])
+      .then(([cfg, rem]) => {
         setBaseUrl(cfg.base_url);
         setModelName(cfg.model_name);
         setProviderType(cfg.provider_type);
+        setReminderConfig(rem);
         // api_key 后端已脱敏为 "****"，不回填，保持空白提示用户重新输入
       })
       .catch((e) => showStatus(`加载配置失败: ${String(e)}`, "error"))
@@ -86,6 +104,30 @@ export default function Settings({ onClose }: Props) {
       setIsSaving(false);
     }
     // 保存成功后不重置 isSaving，防止关闭前按钮闪烁
+  }
+
+  async function handleSaveReminders() {
+    setIsReminderSaving(true);
+    showStatus("正在保存提醒设置...", "loading");
+    try {
+      const breakM = Math.max(1, Math.floor(reminderConfig.breakIntervalMinutes));
+      const longM = Math.max(1, Math.floor(reminderConfig.longWorkMinutes));
+      await updateReminderConfig({
+        ...reminderConfig,
+        breakIntervalMinutes: breakM,
+        longWorkMinutes: longM,
+      });
+      setReminderConfig((c) => ({
+        ...c,
+        breakIntervalMinutes: breakM,
+        longWorkMinutes: longM,
+      }));
+      showStatus("✅ 提醒设置已保存", "success");
+    } catch (e) {
+      showStatus(`❌ 保存提醒失败：${String(e)}`, "error");
+    } finally {
+      setIsReminderSaving(false);
+    }
   }
 
   // ── 工具函数 ──────────────────────────────────────────────────────────────
@@ -192,6 +234,102 @@ export default function Settings({ onClose }: Props) {
                 {isSaving ? "保存中..." : "保存"}
               </button>
             </div>
+
+            <div className="settings-divider" />
+
+            <div className="reminder-section-title">休息与定时提醒</div>
+
+            <div className="reminder-toggle-row">
+              <span className="reminder-toggle-label">整点报时</span>
+              <input
+                type="checkbox"
+                className="reminder-toggle"
+                checked={reminderConfig.enableHourly}
+                onChange={(e) =>
+                  setReminderConfig((c) => ({
+                    ...c,
+                    enableHourly: e.target.checked,
+                  }))
+                }
+                disabled={reminderFieldsLocked}
+              />
+            </div>
+            <div className="reminder-toggle-row">
+              <span className="reminder-toggle-label">按间隔休息提醒</span>
+              <input
+                type="checkbox"
+                className="reminder-toggle"
+                checked={reminderConfig.enableBreak}
+                onChange={(e) =>
+                  setReminderConfig((c) => ({
+                    ...c,
+                    enableBreak: e.target.checked,
+                  }))
+                }
+                disabled={reminderFieldsLocked}
+              />
+            </div>
+            <div className="reminder-toggle-row">
+              <span className="reminder-toggle-label">久坐提醒</span>
+              <input
+                type="checkbox"
+                className="reminder-toggle"
+                checked={reminderConfig.enableLongWork}
+                onChange={(e) =>
+                  setReminderConfig((c) => ({
+                    ...c,
+                    enableLongWork: e.target.checked,
+                  }))
+                }
+                disabled={reminderFieldsLocked}
+              />
+            </div>
+
+            <div className="form-field">
+              <label className="form-label">休息间隔（分钟）</label>
+              <input
+                className="form-input form-input-number"
+                type="number"
+                min={1}
+                max={480}
+                value={reminderConfig.breakIntervalMinutes}
+                onChange={(e) => {
+                  const v = parseInt(e.target.value, 10);
+                  setReminderConfig((c) => ({
+                    ...c,
+                    breakIntervalMinutes: Number.isFinite(v) ? v : c.breakIntervalMinutes,
+                  }));
+                }}
+                disabled={reminderFieldsLocked}
+              />
+            </div>
+            <div className="form-field">
+              <label className="form-label">久坐判定（连续工作分钟）</label>
+              <input
+                className="form-input form-input-number"
+                type="number"
+                min={1}
+                max={720}
+                value={reminderConfig.longWorkMinutes}
+                onChange={(e) => {
+                  const v = parseInt(e.target.value, 10);
+                  setReminderConfig((c) => ({
+                    ...c,
+                    longWorkMinutes: Number.isFinite(v) ? v : c.longWorkMinutes,
+                  }));
+                }}
+                disabled={reminderFieldsLocked}
+              />
+            </div>
+
+            <button
+              type="button"
+              className="btn-reminder-save"
+              onClick={() => void handleSaveReminders()}
+              disabled={reminderFieldsLocked}
+            >
+              {isReminderSaving ? "保存中..." : "保存提醒设置"}
+            </button>
 
             {/* 状态提示（带淡入动画） */}
             {statusMessage && (
