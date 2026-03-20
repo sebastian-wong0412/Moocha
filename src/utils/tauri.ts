@@ -60,3 +60,27 @@ export async function acknowledgeReminder(kind: string): Promise<void> {
 export async function triggerBreakReminder(): Promise<void> {
   await invoke("trigger_break_reminder");
 }
+
+/** 显示独立对话窗口 */
+export async function showChatWindow(): Promise<void> {
+  await invoke("show_chat_window");
+}
+
+export async function hideChatWindow(): Promise<void> {
+  await invoke("hide_chat_window");
+}
+
+/** 手动固定 / 取消主窗口置顶（托盘「置顶宠物」） */
+export async function setPetAlwaysOnTop(enabled: boolean): Promise<void> {
+  await invoke("set_pet_always_on_top", { enabled });
+}
+
+/** 当前主窗口是否置顶（警报或手动固定） */
+export async function isPetAlwaysOnTop(): Promise<boolean> {
+  return invoke<boolean>("is_pet_always_on_top");
+}
+
+/** 提醒队列清空后调用：结束警报置顶，不影响手动置顶 */
+export async function clearPetAlertTop(): Promise<void> {
+  await invoke("clear_pet_alert_top");
+}

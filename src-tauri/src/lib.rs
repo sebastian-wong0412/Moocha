@@ -1,18 +1,63 @@
 mod ai;
 mod chat_history;
 mod config;
+mod chat_window;
 mod context_rules;
+mod pet_movement;
 mod reminder;
+mod settings_window;
 mod state;
 mod system_monitor;
+mod tray;
+mod window_layer;
 
 use ai::ContextMessage;
 use chrono::Local;
 use config::AppConfig;
 use context_rules::ReminderConfig;
 use state::{new_shared_state, PetState, SharedState};
+use std::sync::atomic::Ordering;
 use std::sync::Mutex;
-use tauri::{Emitter, Manager};
+use tauri::{Emitter, Manager, WindowEvent};
+
+/// 未配置 API Key 时提示（与前端文案一致）
+const FRIENDLY_NO_API_KEY: &str = "暂时未接入 AI 模型哦~ 请在设置中配置 API Key";
+
+fn provider_requires_api_key(config: &AppConfig) -> bool {
+    !config.provider_type.eq_ignore_ascii_case("ollama")
+}
+
+/// 将 Provider / 网络错误转为用户可读中文（`chat_stream` → `chat-error`）
+fn friendly_chat_error(raw: &str) -> String {
+    let t = raw.trim();
+    if t.is_empty() {
+        return FRIENDLY_NO_API_KEY.to_string();
+    }
+    if t.contains("暂时未接入 AI 模型") {
+        return t.to_string();
+    }
+    let l = t.to_lowercase();
+    if l.contains("401")
+        || l.contains("unauthorized")
+        || l.contains("403")
+        || l.contains("forbidden")
+    {
+        return "认证失败，请检查 API Key 或权限设置是否正确".to_string();
+    }
+    if l.contains("timeout")
+        || l.contains("timed out")
+        || l.contains("failed to resolve")
+        || l.contains("connection")
+        || l.contains("dns")
+        || l.contains("connect error")
+    {
+        return "网络连接失败，请检查网络或服务地址是否可达".to_string();
+    }
+    if l.contains("404") {
+        return "请求的接口不存在，请检查 Base URL 与模型名称".to_string();
+    }
+    "暂时无法连接 AI 服务，请稍后在设置中检查配置".to_string()
+}
 
 // ── Commands ──────────────────────────────────────────────────────────────────
 
@@ -135,6 +180,10 @@ async fn chat(
         })
         .collect();
 
+    if provider_requires_api_key(&config) && config.api_key.trim().is_empty() {
+        return Err(FRIENDLY_NO_API_KEY.to_string());
+    }
+
     let provider = ai::create_provider(&config);
 
     tracing::info!("chat: provider={}, message_len={}", provider.name(), message.len());
@@ -142,7 +191,7 @@ async fn chat(
     provider
         .chat(&message, &ctx)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| friendly_chat_error(&e.to_string()))
 }
 
 /// 流式对话：发送一条消息，通过 Tauri 事件逐块推送回复。
@@ -175,6 +224,12 @@ async fn chat_stream(
         })
         .collect();
 
+    if provider_requires_api_key(&config) && config.api_key.trim().is_empty() {
+        tracing::warn!("chat_stream: 未配置 API Key");
+        let _ = app.emit("chat-error", FRIENDLY_NO_API_KEY);
+        return Ok(());
+    }
+
     let provider = ai::create_provider(&config);
 
     tracing::info!("chat_stream: provider={}", provider.name());
@@ -204,11 +259,15 @@ async fn chat_stream(
             }
             Ok(Err(e)) => {
                 tracing::error!("chat_stream provider 错误: {}", e);
-                let _ = app_bg.emit("chat-error", e.to_string());
+                let friendly = friendly_chat_error(&e.to_string());
+                let _ = app_bg.emit("chat-error", friendly);
             }
             Err(e) => {
                 tracing::error!("chat_stream 任务 panic: {}", e);
-                let _ = app_bg.emit("chat-error", format!("内部错误: {}", e));
+                let _ = app_bg.emit(
+                    "chat-error",
+                    friendly_chat_error(&format!("内部错误: {}", e)),
+                );
             }
         }
     });
@@ -243,7 +302,7 @@ async fn clear_chat_history(app: tauri::AppHandle) -> Result<(), String> {
     chat_history::clear_history(&app).map_err(|e| e.to_string())
 }
 
-// ── 系统监控（v0.5）──────────────────────────────────────────────────────────
+// ── 系统监控（v0.6）──────────────────────────────────────────────────────────
 
 /// 当前前台窗口标题（无法识别时为 `"Unknown"`）。
 #[tauri::command]
@@ -341,8 +400,102 @@ fn acknowledge_reminder(
 #[tauri::command]
 fn trigger_break_reminder(app: tauri::AppHandle) -> Result<(), String> {
     let batch = vec![reminder::manual_break_payload()];
+    if let Some(layer) = app.try_state::<Mutex<window_layer::WindowLayerState>>() {
+        if let Err(e) = window_layer::set_alert_mode(&layer, &app, true) {
+            tracing::warn!("提醒置顶失败: {}", e);
+        }
+    }
     app.emit("pet-reminder", &batch)
-        .map_err(|e| format!("emit 失败: {}", e))
+        .map_err(|e| format!("emit 失败: {}", e))?;
+    Ok(())
+}
+
+/// 手动固定 / 取消主窗口置顶（托盘「置顶宠物」或前端调用）。
+#[tauri::command]
+fn set_pet_always_on_top(
+    enabled: bool,
+    app: tauri::AppHandle,
+    layer: tauri::State<'_, Mutex<window_layer::WindowLayerState>>,
+) -> Result<(), String> {
+    window_layer::set_manually_pinned(&layer, &app, enabled)
+}
+
+/// 当前主窗口是否处于置顶（警报模式或手动固定任一即 true）。
+#[tauri::command]
+fn is_pet_always_on_top(
+    layer: tauri::State<'_, Mutex<window_layer::WindowLayerState>>,
+) -> Result<bool, String> {
+    let g = layer
+        .lock()
+        .map_err(|e| format!("层级状态锁异常: {}", e))?;
+    Ok(g.effective_always_on_top())
+}
+
+/// 提醒队列清空后调用：仅关闭「警报置顶」，不影响手动置顶。
+#[tauri::command]
+fn clear_pet_alert_top(
+    app: tauri::AppHandle,
+    layer: tauri::State<'_, Mutex<window_layer::WindowLayerState>>,
+) -> Result<(), String> {
+    window_layer::clear_alert_mode(&layer, &app)
+}
+
+/// 显示宠物主窗口（托盘 / 前端均可调用）。
+#[tauri::command]
+fn show_pet_window(app: tauri::AppHandle) -> Result<(), String> {
+    tray::show_pet_window(&app)
+}
+
+/// 隐藏宠物主窗口（不退出进程）。
+#[tauri::command]
+fn hide_pet_window(app: tauri::AppHandle) -> Result<(), String> {
+    tray::hide_pet_window(&app)
+}
+
+/// 显示独立设置窗口（居中、聚焦；由托盘或前端调用）。
+#[tauri::command]
+fn show_settings_window(app: tauri::AppHandle) -> Result<(), String> {
+    settings_window::show_settings_window(&app)
+}
+
+/// 隐藏设置窗口。
+#[tauri::command]
+fn hide_settings_window(app: tauri::AppHandle) -> Result<(), String> {
+    settings_window::hide_settings_window(&app)
+}
+
+#[tauri::command]
+fn show_chat_window(app: tauri::AppHandle) -> Result<(), String> {
+    chat_window::show_chat_window(&app)
+}
+
+#[tauri::command]
+fn hide_chat_window(app: tauri::AppHandle) -> Result<(), String> {
+    chat_window::hide_chat_window(&app)
+}
+
+/// 当前显示器与工作区信息（物理像素）
+#[tauri::command]
+fn get_screen_info(window: tauri::WebviewWindow) -> Result<pet_movement::ScreenInfo, String> {
+    pet_movement::screen_info(&window)
+}
+
+/// 设置宠物主窗口位置（物理坐标）
+#[tauri::command]
+fn set_pet_position(app: tauri::AppHandle, x: i32, y: i32) -> Result<(), String> {
+    pet_movement::set_pet_window_position(&app, x, y)
+}
+
+#[tauri::command]
+fn start_pet_patrol(state: tauri::State<'_, pet_movement::PetPatrolState>) -> Result<(), String> {
+    state.enabled.store(true, Ordering::SeqCst);
+    Ok(())
+}
+
+#[tauri::command]
+fn stop_pet_patrol(state: tauri::State<'_, pet_movement::PetPatrolState>) -> Result<(), String> {
+    state.enabled.store(false, Ordering::SeqCst);
+    Ok(())
 }
 
 // ── 内部辅助 ──────────────────────────────────────────────────────────────────
@@ -403,6 +556,20 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(shared_state)
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                let label = window.label();
+                if label == tray::MAIN_WINDOW_LABEL
+                    || label == settings_window::SETTINGS_WINDOW_LABEL
+                    || label == chat_window::CHAT_WINDOW_LABEL
+                {
+                    api.prevent_close();
+                    if let Err(e) = window.hide() {
+                        tracing::warn!("关闭改为隐藏失败: {}", e);
+                    }
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             get_pet_status,
             get_config,
@@ -425,9 +592,37 @@ pub fn run() {
             update_reminder_config,
             acknowledge_reminder,
             trigger_break_reminder,
+            set_pet_always_on_top,
+            is_pet_always_on_top,
+            clear_pet_alert_top,
+            show_pet_window,
+            hide_pet_window,
+            show_settings_window,
+            hide_settings_window,
+            show_chat_window,
+            hide_chat_window,
+            get_screen_info,
+            set_pet_position,
+            start_pet_patrol,
+            stop_pet_patrol,
         ])
         .manage(Mutex::new(context_rules::RuleDeduper::default()))
+        .manage(pet_movement::PetPatrolState::default())
+        .manage(Mutex::new(window_layer::WindowLayerState::default()))
         .setup(|app| {
+            if let Err(e) = tray::create_tray(app) {
+                tracing::error!("初始化系统托盘失败: {}", e);
+            }
+
+            // 首帧即落在工作区右下角，避免默认 (0,0) 再被巡逻任务「瞬移」
+            if let Some(main_win) = app.handle().get_webview_window(tray::MAIN_WINDOW_LABEL) {
+                if let Err(e) = pet_movement::snap_pet_window_bottom_right(&main_win) {
+                    tracing::warn!("宠物初始落位失败: {}", e);
+                }
+            } else {
+                tracing::warn!("启动时未找到主窗口，跳过失一落位");
+            }
+
             let h = app.handle().clone();
             let bundle = reminder::ReminderBundle::load(&h).unwrap_or_default();
             if !app.manage(Mutex::new(bundle)) {
@@ -441,6 +636,13 @@ pub fn run() {
                 s.is_ready = true;
                 s.pet_state = PetState::Idle;
                 tracing::info!("Moocha 已就绪");
+            });
+
+            // 宠物底部巡逻（主窗口）
+            let patrol_enabled = app.state::<pet_movement::PetPatrolState>().enabled.clone();
+            let patrol_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                pet_movement::run_patrol_loop(patrol_handle, patrol_enabled).await;
             });
 
             // 情境规则 + 定时提醒：每 60 秒
@@ -504,6 +706,15 @@ pub fn run() {
                     };
 
                     if !pet_reminders.is_empty() {
+                        if let Some(layer) =
+                            app_handle.try_state::<Mutex<window_layer::WindowLayerState>>()
+                        {
+                            if let Err(e) =
+                                window_layer::set_alert_mode(&layer, &app_handle, true)
+                            {
+                                tracing::warn!("提醒置顶失败: {}", e);
+                            }
+                        }
                         if let Err(e) = app_handle.emit("pet-reminder", &pet_reminders) {
                             tracing::warn!("emit pet-reminder 失败: {}", e);
                         }

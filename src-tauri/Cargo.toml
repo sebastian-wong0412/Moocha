@@ -1,6 +1,6 @@
 [package]
 name = "moocha"
-version = "0.5.0"
+version = "0.6.0"
 description = "A Rust-powered AI Desktop Pet (Siberian Forest Cat)"
 authors = ["Your Name"]
 edition = "2021"

@@ -1,5 +1,39 @@
 # Changelog
 
+## [0.6.0] - 2026-03-20
+
+### Added
+- System tray with icon and menu
+- Hidden taskbar mode (skipTaskbar)
+- Independent settings window (centered, scrollable)
+- Independent chat window (centered, scrollable)
+- Pet patrol system (bottom screen movement)
+- Dynamic window layer management (alert mode / manual pin)
+- Tray menu: Show/Hide Pet, Chat, Settings, Pin, Exit
+- Friendly API error messages (in-chat notification)
+- Pet mood sync from chat window
+
+### Changed
+- Settings moved from modal to independent window
+- Chat moved from modal to independent window
+- Pet window reduced to 150×150 for bottom patrol
+- Click animation changed from scale to translateY (no conflict)
+- API errors shown as assistant message instead of red banner
+- Pet starts at bottom-right immediately (no teleport)
+
+### Fixed
+- Window nesting in settings (single title bar)
+- Settings scroll issue (independent scroll layer)
+- Pet click animation conflict with patrol scale
+- API error handling (friendly messages)
+- Window initial position (no teleport after launch)
+
+### Architecture
+- Multi-window setup (main, settings, chat)
+- Window layer state management (alert + manual pin)
+- Backend patrol loop with smooth interpolation
+- Mood sync between chat and pet windows
+
 ## [0.5.0] - 2026-03-17
 
 ### Added

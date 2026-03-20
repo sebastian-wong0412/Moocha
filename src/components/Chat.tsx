@@ -1,19 +1,30 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+} from "react";
+import { emitTo } from "@tauri-apps/api/event";
 import type { PetMood } from "../types/pet";
 import type { ChatMessage } from "../types/chat";
 import {
   clearChatHistory,
   getChatHistory,
+  mapChatFriendlyError,
   saveChatMessage,
   sendMessageStream,
 } from "../utils/chat";
 import "./Chat.css";
 
 interface Props {
-  onClose: () => void;
-  /** 当前宠物心情（展示用） */
+  /** 独立窗口：无模态遮罩与关闭按钮，心情通过事件同步到主窗口 */
+  standalone?: boolean;
+  /** 叠加在宠物窗上时需要 */
+  onClose?: () => void;
+  /** 当前宠物心情（展示用；独立窗口可省略） */
   petMood?: PetMood;
-  /** 对话情绪联动：发送 / 首包 / 完成 / 错误 时更新宠物 */
+  /** 对话情绪联动（非 standalone 时由父组件更新宠物） */
   onMoodChange?: (mood: PetMood) => void;
 }
 
@@ -38,20 +49,42 @@ function normalizeHistoryRow(m: ChatMessage): ChatMessage {
 /**
  * 对话面板：流式 `chat_stream` + 历史持久化 + 宠物情绪联动。
  */
-export default function Chat({ onClose, petMood, onMoodChange }: Props) {
+export default function Chat({
+  standalone = false,
+  onClose,
+  petMood,
+  onMoodChange,
+}: Props) {
+  function notifyMood(mood: PetMood) {
+    if (standalone) {
+      void emitTo("main", "pet-mood-sync", mood);
+    } else {
+      onMoodChange?.(mood);
+    }
+  }
   const [messages, setMessages] = useState<ChatMessage[]>([DEFAULT_WELCOME]);
   const [historyLoaded, setHistoryLoaded] = useState(false);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
-  const [isError, setIsError] = useState(false);
-  const [error, setError] = useState<string | undefined>();
 
   const listRef = useRef<HTMLDivElement>(null);
   const assistantStreamIdRef = useRef<string | null>(null);
   /** 当前轮助手流式累积（用于成功后写盘） */
   const streamAccumRef = useRef({ id: "", content: "", ts: 0 });
   const abortRef = useRef<AbortController | null>(null);
+
+  const appendAssistantMessage = useCallback((content: string) => {
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: newId(),
+        role: "assistant",
+        content,
+        timestamp: Date.now(),
+      },
+    ]);
+  }, []);
 
   // 挂载时加载历史；无记录则保留本地欢迎语
   useEffect(() => {
@@ -67,8 +100,9 @@ export default function Chat({ onClose, petMood, onMoodChange }: Props) {
       })
       .catch((e) => {
         if (!cancelled) {
-          setIsError(true);
-          setError(`加载历史失败: ${String(e)}`);
+          appendAssistantMessage(
+            `加载对话记录失败，请稍后再试。（${String(e)}）`,
+          );
         }
       })
       .finally(() => {
@@ -77,7 +111,7 @@ export default function Chat({ onClose, petMood, onMoodChange }: Props) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [appendAssistantMessage]);
 
   useEffect(() => {
     const el = listRef.current;
@@ -97,11 +131,8 @@ export default function Chat({ onClose, petMood, onMoodChange }: Props) {
     try {
       await clearChatHistory();
       setMessages([{ ...DEFAULT_WELCOME, id: newId(), timestamp: Date.now() }]);
-      setIsError(false);
-      setError(undefined);
     } catch (e) {
-      setIsError(true);
-      setError(`清除历史失败: ${String(e)}`);
+      appendAssistantMessage(`清除历史失败，请稍后再试。（${String(e)}）`);
     }
   }
 
@@ -109,9 +140,7 @@ export default function Chat({ onClose, petMood, onMoodChange }: Props) {
     const text = input.trim();
     if (!text || isLoading || !historyLoaded) return;
 
-    setIsError(false);
-    setError(undefined);
-    onMoodChange?.("excited");
+    notifyMood("excited");
 
     const userMsg: ChatMessage = {
       id: newId(),
@@ -132,8 +161,7 @@ export default function Chat({ onClose, petMood, onMoodChange }: Props) {
     try {
       await saveChatMessage(userMsg);
     } catch (e) {
-      setIsError(true);
-      setError(`保存消息失败: ${String(e)}`);
+      appendAssistantMessage(`保存消息失败，请稍后再试。（${String(e)}）`);
     }
 
     abortRef.current?.abort();
@@ -150,7 +178,7 @@ export default function Chat({ onClose, petMood, onMoodChange }: Props) {
             const ts = Date.now();
             assistantStreamIdRef.current = id;
             streamAccumRef.current = { id, content: chunk, ts };
-            onMoodChange?.("curious");
+            notifyMood("curious");
             setIsLoading(false);
             setStreamingMessageId(id);
             setMessages((prev) => [
@@ -174,7 +202,7 @@ export default function Chat({ onClose, petMood, onMoodChange }: Props) {
         },
         ac.signal,
       );
-      onMoodChange?.("happy");
+      notifyMood("happy");
 
       const { id, content, ts } = streamAccumRef.current;
       if (id && content.length > 0) {
@@ -186,19 +214,19 @@ export default function Chat({ onClose, petMood, onMoodChange }: Props) {
             timestamp: ts,
           });
         } catch (saveErr) {
-          setIsError(true);
-          setError(`保存回复失败: ${String(saveErr)}`);
+          appendAssistantMessage(
+            `保存回复失败，请稍后再试。（${String(saveErr)}）`,
+          );
         }
       }
     } catch (e) {
       if (e instanceof DOMException && e.name === "AbortError") {
         return;
       }
-      onMoodChange?.("sleepy");
+      notifyMood("sleepy");
       const msg =
         e instanceof Error ? e.message : typeof e === "string" ? e : String(e);
-      setIsError(true);
-      setError(msg);
+      appendAssistantMessage(mapChatFriendlyError(msg));
     } finally {
       assistantStreamIdRef.current = null;
       streamAccumRef.current = { id: "", content: "", ts: 0 };
@@ -217,30 +245,34 @@ export default function Chat({ onClose, petMood, onMoodChange }: Props) {
     }
   }
 
-  const moodLabel = petMood ?? "idle";
-
-  return (
-    <div className="chat-overlay" role="dialog" aria-labelledby="chat-title">
-      <div className="chat-panel">
-        <header className="chat-header">
-          <div className="chat-header-text">
-            <span id="chat-title" className="chat-title">
-              💬 对话
-            </span>
+  const panel = (
+    <div
+      className={`chat-panel${standalone ? " chat-panel--standalone" : ""}`}
+      role={standalone ? undefined : "dialog"}
+      aria-labelledby="chat-title"
+    >
+      <header className="chat-header">
+        <div className="chat-header-text">
+          <span id="chat-title" className="chat-title">
+            💬 对话
+          </span>
+          {!standalone && (
             <span className="chat-mood" title="当前宠物心情">
-              心情 · {moodLabel}
+              心情 · {petMood ?? "idle"}
             </span>
-          </div>
-          <div className="chat-header-actions">
-            <button
-              type="button"
-              className="chat-clear"
-              onClick={() => void handleClearHistory()}
-              disabled={isLoading}
-              title="清除本地对话历史"
-            >
-              清空
-            </button>
+          )}
+        </div>
+        <div className="chat-header-actions">
+          <button
+            type="button"
+            className="chat-clear"
+            onClick={() => void handleClearHistory()}
+            disabled={isLoading}
+            title="清除本地对话历史"
+          >
+            清空
+          </button>
+          {!standalone && onClose && (
             <button
               type="button"
               className="chat-close"
@@ -250,14 +282,9 @@ export default function Chat({ onClose, petMood, onMoodChange }: Props) {
             >
               ×
             </button>
-          </div>
-        </header>
-
-        {isError && error && (
-          <div className="chat-error-banner" role="alert">
-            {error}
-          </div>
-        )}
+          )}
+        </div>
+      </header>
 
         <div ref={listRef} className="chat-messages">
           {messages.map((m) => (
@@ -303,27 +330,32 @@ export default function Chat({ onClose, petMood, onMoodChange }: Props) {
           )}
         </div>
 
-        <footer className="chat-footer">
-          <textarea
-            className="chat-input"
-            rows={1}
-            placeholder="输入消息…"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            disabled={isLoading || !historyLoaded}
-            aria-label="输入消息"
-          />
-          <button
-            type="button"
-            className="chat-send"
-            onClick={() => void handleSend()}
-            disabled={isLoading || !input.trim() || !historyLoaded}
-          >
-            发送
-          </button>
-        </footer>
-      </div>
+      <footer className="chat-footer">
+        <textarea
+          className="chat-input"
+          rows={1}
+          placeholder="输入消息…"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={handleKeyDown}
+          disabled={isLoading || !historyLoaded}
+          aria-label="输入消息"
+        />
+        <button
+          type="button"
+          className="chat-send"
+          onClick={() => void handleSend()}
+          disabled={isLoading || !input.trim() || !historyLoaded}
+        >
+          发送
+        </button>
+      </footer>
     </div>
   );
+
+  if (standalone) {
+    return <div className="chat-standalone-root">{panel}</div>;
+  }
+
+  return <div className="chat-overlay">{panel}</div>;
 }

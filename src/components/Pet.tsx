@@ -9,7 +9,7 @@ import { useMoodChange } from "../hooks/useMoodChange";
 import { useContextActions } from "../hooks/useContextActions";
 import type { PetAppearance, PetMood } from "../types/pet";
 import type { PetReminderPayload } from "../types/petReminder";
-import { acknowledgeReminder } from "../utils/tauri";
+import { acknowledgeReminder, clearPetAlertTop } from "../utils/tauri";
 import "./Pet.css";
 
 export type { PetMood };
@@ -149,7 +149,15 @@ export default function Pet({ mood = "idle", appearance = svgAppearance, onMoodC
     } catch {
       /* 离线/调试时仍可关闭 UI */
     }
-    setReminderQueue((q) => q.slice(1));
+    setReminderQueue((q) => {
+      const next = q.slice(1);
+      if (next.length === 0) {
+        void clearPetAlertTop().catch(() => {
+          /* 调试或未就绪时忽略 */
+        });
+      }
+      return next;
+    });
   }
 
   useEffect(() => {

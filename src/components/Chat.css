@@ -28,6 +28,26 @@
   -webkit-app-region: no-drag;
 }
 
+/* 独立对话窗口：铺满 WebView，内部消息区滚动 */
+.chat-standalone-root {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.chat-panel--standalone {
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  border-radius: 0;
+  border: none;
+  box-shadow: none;
+  background: #161618;
+}
+
 /* ── 标题栏 ── */
 
 .chat-header {
@@ -243,20 +263,6 @@
     transform: translateY(-5px);
     opacity: 1;
   }
-}
-
-/* ── 错误提示 ── */
-
-.chat-error-banner {
-  flex-shrink: 0;
-  margin: 0 10px 8px;
-  padding: 8px 10px;
-  font-size: 11px;
-  line-height: 1.35;
-  color: #fecaca;
-  background: rgba(127, 29, 29, 0.45);
-  border: 1px solid rgba(248, 113, 113, 0.25);
-  border-radius: 8px;
 }
 
 /* ── 输入区（贴底）── */

@@ -106,16 +106,26 @@
 }
 
 /* ── 点击动画 ── */
+/* 注意：.pet-container 在 App.css 上有整体 scale(0.36)，若在容器上做 scale 动画会覆盖并导致异常放大。
+   改为仅对内部 .pet-svg 做轻微上跳，不与外层缩放冲突。 */
 
 @keyframes petClick {
-  0%   { transform: scale(1);    }
-  50%  { transform: scale(1.15); }
-  100% { transform: scale(1);    }
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
 }
 
 .pet-container--clicking {
-  animation: petClick 0.3s ease-out;
   cursor: pointer;
+}
+
+/* 短暂覆盖各情绪下的 SVG 动画（呼吸/弹跳等），避免与点击动画抢 transform */
+.pet-container--clicking .pet-svg {
+  animation: petClick 0.32s ease-out !important;
 }
 
 /* ── SVG 基础 ── */

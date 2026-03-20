@@ -2,6 +2,51 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { ChatMessage } from "../types/chat";
 
+/** 与后端 `lib.rs` 一致的未配置提示 */
+export const FRIENDLY_NO_API_KEY =
+  "暂时未接入 AI 模型哦~ 请在设置中配置 API Key";
+
+/**
+ * 将 invoke / 事件中的原始错误转为对用户友好的中文说明。
+ * 后端已映射过的文案会原样返回。
+ */
+export function mapChatFriendlyError(raw: string): string {
+  const t = raw.trim();
+  if (!t) return FRIENDLY_NO_API_KEY;
+  if (
+    t.includes("暂时未接入 AI 模型") ||
+    t.includes("认证失败，请检查") ||
+    t.includes("网络连接失败，请检查") ||
+    t.includes("请求的接口不存在")
+  ) {
+    return t;
+  }
+  const l = t.toLowerCase();
+  if (
+    l.includes("401") ||
+    l.includes("unauthorized") ||
+    l.includes("403") ||
+    l.includes("forbidden")
+  ) {
+    return "认证失败，请检查 API Key 或权限设置是否正确";
+  }
+  if (
+    l.includes("timeout") ||
+    l.includes("timed out") ||
+    l.includes("failed to resolve") ||
+    l.includes("connection") ||
+    l.includes("dns") ||
+    l.includes("network") ||
+    l.includes("fetch")
+  ) {
+    return "网络连接失败，请检查网络或服务地址是否可达";
+  }
+  if (l.includes("404")) {
+    return "请求的接口不存在，请检查 Base URL 与模型名称";
+  }
+  return "暂时无法连接 AI 服务，请稍后在设置中检查配置";
+}
+
 /** 从磁盘加载对话历史 */
 export async function getChatHistory(): Promise<ChatMessage[]> {
   return invoke<ChatMessage[]>("get_chat_history");
@@ -41,7 +86,7 @@ export async function sendMessage(
         : e instanceof Error
           ? e.message
           : JSON.stringify(e);
-    throw new Error(msg);
+    throw new Error(mapChatFriendlyError(msg));
   }
 }
 
@@ -104,7 +149,7 @@ export async function sendMessageStream(
     const ulErr = await listen<string>("chat-error", (event) => {
       cleanup();
       signal?.removeEventListener("abort", onAbort);
-      rejectDone(new Error(event.payload));
+      rejectDone(new Error(mapChatFriendlyError(event.payload)));
     });
     unlisteners.push(ulErr);
 
@@ -121,7 +166,7 @@ export async function sendMessageStream(
         : e instanceof Error
           ? e.message
           : JSON.stringify(e);
-    throw new Error(msg);
+    throw new Error(mapChatFriendlyError(msg));
   }
 
   await donePromise;

@@ -71,7 +71,7 @@ impl RuleEngine {
     /// 与全局 `check_rules` 一致：内置匹配 + 将来可合并 `self.custom`
     pub fn check_rules(&self, app: &str, time: &str, idle: u64) -> Vec<ContextAction> {
         let out = evaluate_builtin(app, time, idle);
-        // v0.5：custom 规则仅占位，不做字符串 DSL 解析
+        // v0.6：custom 规则仅占位，不做字符串 DSL 解析
         let _ = &self.custom;
         out
     }

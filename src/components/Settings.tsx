@@ -14,10 +14,16 @@ import "./Settings.css";
 type StatusType = "success" | "error" | "loading" | null;
 
 interface Props {
-  onClose: () => void;
+  /**
+   * 独立设置窗口：无内层标题栏/关闭按钮，无卡片式嵌套；保存成功不自动关窗。
+   * 叠加在宠物窗上时传 false 并提供 onClose。
+   */
+  standalone?: boolean;
+  /** 叠加模式下的关闭回调（显示右上角 ✕ 且保存成功可自动关闭） */
+  onClose?: () => void;
 }
 
-export default function Settings({ onClose }: Props) {
+export default function Settings({ standalone = false, onClose }: Props) {
   // ── 表单字段 ─────────────────────────────────────────────────────────────
   const [apiKey, setApiKey] = useState("");
   const [baseUrl, setBaseUrl] = useState("https://api.openai.com/v1");
@@ -97,13 +103,15 @@ export default function Settings({ onClose }: Props) {
     try {
       await saveConfig(buildConfig());
       showStatus("✅ 配置已保存", "success");
-      // 短暂显示成功提示后自动关闭
-      closeTimerRef.current = setTimeout(onClose, 1200);
+      if (!standalone && onClose) {
+        closeTimerRef.current = setTimeout(onClose, 1200);
+      } else {
+        setIsSaving(false);
+      }
     } catch (e) {
       showStatus(`❌ 保存失败：${String(e)}`, "error");
       setIsSaving(false);
     }
-    // 保存成功后不重置 isSaving，防止关闭前按钮闪烁
   }
 
   async function handleSaveReminders() {
@@ -148,29 +156,10 @@ export default function Settings({ onClose }: Props) {
 
   // ── 渲染 ──────────────────────────────────────────────────────────────────
 
-  return (
-    <div className="settings-overlay">
-      <div className="settings-panel">
-        {/* 标题栏 */}
-        <div className="settings-header">
-          <span className="settings-title">Moocha 设置</span>
-          <button
-            className="settings-close"
-            onClick={onClose}
-            title="关闭"
-            disabled={isBusy}
-          >
-            ✕
-          </button>
-        </div>
-
-        <div className="settings-divider" />
-
-        {/* 初始加载占位 */}
-        {isLoading ? (
-          <div className="status-message loading">加载配置中...</div>
-        ) : (
-          <div className="settings-form">
+  const formBlock = isLoading ? (
+    <div className="status-message loading">加载配置中...</div>
+  ) : (
+    <div className="settings-form">
             <div className="form-field">
               <label className="form-label">服务商</label>
               <input
@@ -341,7 +330,33 @@ export default function Settings({ onClose }: Props) {
               </div>
             )}
           </div>
-        )}
+  );
+
+  if (standalone) {
+    return <div className="settings-container">{formBlock}</div>;
+  }
+
+  return (
+    <div className="settings-overlay">
+      <div className="settings-panel">
+        <div className="settings-header">
+          <span className="settings-title">Moocha 设置</span>
+          {onClose && (
+            <button
+              type="button"
+              className="settings-close"
+              onClick={onClose}
+              title="关闭"
+              disabled={isBusy}
+            >
+              ✕
+            </button>
+          )}
+        </div>
+
+        <div className="settings-divider" />
+
+        {formBlock}
       </div>
     </div>
   );
